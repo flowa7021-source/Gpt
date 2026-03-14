@@ -1,0 +1,76 @@
+name: windows-installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: Build configuration
+        required: false
+        default: Release
+        type: choice
+        options:
+          - Release
+          - RelWithDebInfo
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-latest
+    env:
+      CONFIGURATION: ${{ github.event.inputs.configuration || 'Release' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up MSVC developer command prompt
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --no-progress -y
+
+      - name: Show tool versions
+        shell: powershell
+        run: |
+          python --version
+          cmake --version
+          ctest --version
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /?
+
+      - name: Build installer and release artifacts
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/build_windows_installer.ps1 -Configuration $env:CONFIGURATION -RequireInno
+          powershell -ExecutionPolicy Bypass -File scripts/build_windows_release_bundle.ps1 -Configuration $env:CONFIGURATION
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfflineDocStudio-windows-${{ env.CONFIGURATION }}
+          path: |
+            dist/*
+            build/${{ env.CONFIGURATION }}/offline_doc_studio.exe
+          if-no-files-found: error
+
+      - name: Attach assets to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
